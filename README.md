@@ -1,6 +1,6 @@
 # fastjson-1.2.83-RCEskill
 
-AI agent skill for detecting and exploiting Fastjson @JSONType RCE (QVD-2026-43021).
+AI agent skill for detecting and exploiting Fastjson @JSONType 1.2.83 RCE.
 
 ## What it does
 
