@@ -16,7 +16,7 @@ Once imported, an AI agent can autonomously:
 
 Copy this repo URL and paste it to your AI agent, or place `SKILL.md` in the skill directory manually:
 
-> [https://github.com/TAOxxx7/fastjson-1.2.83-RCEskill](https://github.com/TAOxxx7/AI-for-fastjson-1.2.83-RCE-skill)
+> https://github.com/TAOxxx7/AI-for-fastjson-1.2.83-RCE-skill
 
 Then prompt:
 
