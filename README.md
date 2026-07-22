@@ -14,7 +14,11 @@ Once imported, an AI agent can autonomously:
 
 ## Usage
 
-Place `SKILL.md` in your AI agent's skill directory, then prompt:
+Copy this repo URL and paste it to your AI agent, or place `SKILL.md` in the skill directory manually:
+
+> https://github.com/TAOxxx7/fastjson-1.2.83-RCEskill
+
+Then prompt:
 
 > Check if http://TARGET:8080/api/parse is vulnerable to Fastjson @JSONType RCE
 
